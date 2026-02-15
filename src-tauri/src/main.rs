@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Manager, Window};
+use tauri::{Manager, WebviewWindow};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowA, FindWindowExA, SendMessageTimeoutA, SetParent, 
@@ -8,36 +8,69 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 // --- WorkerW Hack Implementation ---
-// This function finds the hidden "WorkerW" window behind desktop icons 
-// and glues your app window to it.
 #[tauri::command]
-fn attach_to_desktop(window: Window) {
-    let window_handle = window.hwnd().unwrap().0;
+fn attach_to_desktop(window: WebviewWindow) {
+    // In Tauri v2, window.hwnd() returns a Result. We expect it to succeed.
+    let window_hwnd = window.hwnd().expect("Failed to get window handle");
 
     unsafe {
-        // 1. Ask Windows Program Manager (Progman) to spawn a WorkerW
-        let progman = FindWindowA(windows::core::PCSTR("Progman\0".as_ptr()), windows::core::PCSTR::null());
-        SendMessageTimeoutA(progman, 0x052C, WPARAM(0), LPARAM(0), SMTO_NORMAL, 1000, None);
+        // 1. Find Progman (Program Manager)
+        let progman = FindWindowA(
+            windows::core::PCSTR("Progman\0".as_ptr()), 
+            windows::core::PCSTR::null()
+        ).unwrap_or(HWND(std::ptr::null_mut()));
 
-        // 2. Hunt for the WorkerW that is actually behind the icons
-        // (It is the sibling of SHELLDLL_DefView)
-        let mut worker_w: HWND = HWND(0);
+        // 2. Send 0x052C to Progman to spawn the WorkerW
+        let _ = SendMessageTimeoutA(
+            progman, 
+            0x052C, 
+            WPARAM(0), 
+            LPARAM(0), 
+            SMTO_NORMAL, 
+            1000, 
+            None
+        );
+
+        // 3. Find the correct WorkerW
+        let mut worker_w: HWND = HWND(std::ptr::null_mut());
         
         unsafe extern "system" fn enum_window_callback(handle: HWND, lparam: LPARAM) -> BOOL {
             let p_worker_w = lparam.0 as *mut HWND;
-            let shell_dll = FindWindowExA(handle, HWND(0), windows::core::PCSTR("SHELLDLL_DefView\0".as_ptr()), windows::core::PCSTR::null());
             
-            if shell_dll.0 != 0 {
-                *p_worker_w = FindWindowExA(HWND(0), handle, windows::core::PCSTR("WorkerW\0".as_ptr()), windows::core::PCSTR::null());
-                return BOOL(0); // Found it, stop searching
+            // Search for SHELLDLL_DefView child
+            let shell_dll = FindWindowExA(
+                handle, 
+                HWND(std::ptr::null_mut()), 
+                windows::core::PCSTR("SHELLDLL_DefView\0".as_ptr()), 
+                windows::core::PCSTR::null()
+            );
+
+            // If we found the window containing icons (SHELLDLL_DefView)
+            if let Ok(shell_handle) = shell_dll {
+                if shell_handle.0 != std::ptr::null_mut() {
+                    // The WorkerW we want is the *next* sibling of the current handle
+                    let worker = FindWindowExA(
+                        HWND(std::ptr::null_mut()), 
+                        handle, 
+                        windows::core::PCSTR("WorkerW\0".as_ptr()), 
+                        windows::core::PCSTR::null()
+                    );
+
+                    if let Ok(w_handle) = worker {
+                         *p_worker_w = w_handle;
+                    }
+                    return BOOL(0); // Stop enumerating
+                }
             }
-            BOOL(1) // Keep searching
+            BOOL(1) // Continue enumerating
         }
+
+        // Pass the pointer to our worker_w variable into the callback
         EnumWindows(Some(enum_window_callback), LPARAM(&mut worker_w as *mut _ as isize));
 
-        // 3. Glue our window to the WorkerW
-        if worker_w.0 != 0 {
-            SetParent(HWND(window_handle as isize), worker_w);
+        // 4. Glue our window to the WorkerW
+        if worker_w.0 != std::ptr::null_mut() {
+            let _ = SetParent(window_hwnd, worker_w);
         }
     }
 }
@@ -47,16 +80,12 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![attach_to_desktop])
         .setup(|app| {
-            let main_window = app.get_window("main").unwrap();
+            // In Tauri v2, we use get_webview_window instead of get_window
+            let main_window = app.get_webview_window("main").unwrap();
             
-            // Automatically attach to desktop on launch
-            // We verify if we are in development or production to avoid weird behavior during debugging
-            #[cfg(not(debug_assertions))] 
+            // Attach to desktop immediately
+            // Note: In debug mode, this might make the window hard to close (Alt+F4 to exit)
             attach_to_desktop(main_window);
-
-            // In dev mode, we might want to keep it floating to see errors, 
-            // but you can uncomment the line below to test the hack in dev:
-            // attach_to_desktop(main_window);
             
             Ok(())
         })
