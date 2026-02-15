@@ -80,3 +80,6 @@ recordings/
 # Backup files
 *.bak
 *.backup
+
+# ESLint cache
+.eslintcache
