@@ -6,13 +6,12 @@ import path from 'path'
 export default defineConfig(async () => ({
   plugins: [react()],
   
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
+  // Vite options tailored for Tauri development
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
     watch: {
-      // Tell Vite to ignore watching `src-tauri`
       ignored: ['**/src-tauri/**'],
     },
   },
@@ -23,17 +22,14 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@/components': path.resolve(__dirname, './src/components'),
-      '@/lib': path.resolve(__dirname, './src/lib'),
-      '@/styles': path.resolve(__dirname, './src/styles'),
     },
+    // Explicitly list extensions to resolve
+    extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json']
   },
   
   build: {
     target: process.env.TAURI_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
-    // Don't minify for debug builds
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
-    // Produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_DEBUG,
   },
 }))
