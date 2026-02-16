@@ -15,7 +15,7 @@
     "fs:allow-rename",
     "fs:allow-copy-file",
     "process:allow-exit",
-    "process:allow-relaunch",
+    "process:allow-restart",
     "core:window:allow-close",
     "core:window:allow-hide",
     "core:window:allow-show",
