@@ -1,7 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::{Manager, WebviewWindow};
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM, BOOL};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::core::BOOL; // Stable boolean type
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowA, FindWindowExA, SendMessageTimeoutA, SetParent, 
     SMTO_NORMAL
@@ -9,22 +10,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 #[tauri::command]
 fn attach_to_desktop(window: WebviewWindow) {
-    // 1. Get the handle from Tauri
     let tauri_handle = window.hwnd().expect("Failed to get window handle");
-
-    // 2. FORCE CAST the handle (Tauri's handle -> Windows 0.61 handle)
+    // Safety cast for crate version compatibility
     let window_hwnd: HWND = unsafe { std::mem::transmute(tauri_handle) };
 
     unsafe {
-        // 3. Find Progman (Program Manager)
-        // FindWindowA returns Result<HWND>. We unwrap it.
+        // 1. Find Progman
+        // .unwrap_or handles the Result, falling back to a null handle if it fails
         let progman = FindWindowA(
             windows::core::PCSTR("Progman\0".as_ptr()), 
             windows::core::PCSTR::null()
         ).unwrap_or(HWND(std::ptr::null_mut()));
 
-        // 4. Send 0x052C to Progman to spawn the WorkerW
-        // SendMessageTimeoutA takes HWND directly
+        // 2. Spawn WorkerW
         let _ = SendMessageTimeoutA(
             progman, 
             0x052C, 
@@ -35,27 +33,27 @@ fn attach_to_desktop(window: WebviewWindow) {
             None
         );
 
-        // 5. Find the WorkerW sibling of SHELLDLL_DefView
+        // 3. Find the correct WorkerW
+        // Initialize with null_mut, NOT 0
         let mut worker_w: HWND = HWND(std::ptr::null_mut());
         
         unsafe extern "system" fn enum_window_callback(handle: HWND, lparam: LPARAM) -> BOOL {
             let p_worker_w = lparam.0 as *mut HWND;
             
-            // FindWindowExA arguments must be Option<HWND> (Some/None)
-            // It returns Result<HWND>
+            // FindWindowExA returns Result<HWND>
             let shell_dll = FindWindowExA(
-                Some(handle), 
-                None, 
+                handle, 
+                HWND(std::ptr::null_mut()), 
                 windows::core::PCSTR("SHELLDLL_DefView\0".as_ptr()), 
                 windows::core::PCSTR::null()
             );
 
+            // Check if Result is Ok and handle is not null
             if let Ok(shell) = shell_dll {
                 if shell.0 != std::ptr::null_mut() {
-                    // Found SHELLDLL_DefView, look for WorkerW sibling
                     let worker = FindWindowExA(
-                        None, 
-                        Some(handle), 
+                        HWND(std::ptr::null_mut()), 
+                        handle, 
                         windows::core::PCSTR("WorkerW\0".as_ptr()), 
                         windows::core::PCSTR::null()
                     );
@@ -65,19 +63,17 @@ fn attach_to_desktop(window: WebviewWindow) {
                              *p_worker_w = w;
                         }
                     }
-                    return BOOL(0); // Stop enumerating (False)
+                    return BOOL::from(false); // Stop enumerating
                 }
             }
-            BOOL(1) // Continue enumerating (True)
+            BOOL::from(true) // Continue enumerating
         }
 
-        // Pass pointer to worker_w
         let _ = EnumWindows(Some(enum_window_callback), LPARAM(&mut worker_w as *mut _ as isize));
 
-        // 6. Glue our window to the WorkerW
-        // SetParent takes Option<HWND> for the parent
+        // 4. Glue window
         if worker_w.0 != std::ptr::null_mut() {
-            let _ = SetParent(window_hwnd, Some(worker_w));
+            let _ = SetParent(window_hwnd, worker_w);
         }
     }
 }
