@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-50: #f0f9ff;
+  --color-primary-100: #e0f2fe;
+  --color-primary-500: #0ea5e9;
+  --color-primary-900: #0c4a6e;
+  
+  --color-accent-500: #a855f7;
+  --color-accent-600: #9333ea;
+  
+  --animate-float: float 6s ease-in-out infinite;
+  
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+  }
+}
+
+/* Global Reset */
+body {
+  background-color: #020617; /* Slate-950 */
+  color: white;
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Inter', sans-serif;
+}
