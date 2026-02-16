@@ -15,13 +15,11 @@ fn attach_to_desktop(window: WebviewWindow) {
 
     unsafe {
         // 1. Find Progman
-        let progman = match FindWindowA(
+        // Compiler says this returns HWND directly, so we don't unwrap.
+        let progman = FindWindowA(
             windows::core::PCSTR("Progman\0".as_ptr()), 
             windows::core::PCSTR::null()
-        ) {
-            Ok(handle) => handle,
-            Err(_) => HWND(0),
-        };
+        );
 
         // 2. Spawn WorkerW
         let _ = SendMessageTimeoutA(
@@ -41,6 +39,7 @@ fn attach_to_desktop(window: WebviewWindow) {
             let p_worker_w = lparam.0 as *mut HWND;
             
             // Search for SHELLDLL_DefView
+            // Compiler says this returns HWND directly.
             let shell_dll = FindWindowExA(
                 handle, 
                 HWND(0), 
@@ -48,24 +47,20 @@ fn attach_to_desktop(window: WebviewWindow) {
                 windows::core::PCSTR::null()
             );
 
-            // In 0.52.0, FindWindowExA returns Result<HWND>
-            if let Ok(shell_handle) = shell_dll {
-                if shell_handle.0 != 0 {
-                    // Look for the WorkerW sibling
-                    let worker = FindWindowExA(
-                        HWND(0), 
-                        handle, 
-                        windows::core::PCSTR("WorkerW\0".as_ptr()), 
-                        windows::core::PCSTR::null()
-                    );
+            // Check if handle is valid (not 0)
+            if shell_dll.0 != 0 {
+                // Look for the WorkerW sibling
+                let worker = FindWindowExA(
+                    HWND(0), 
+                    handle, 
+                    windows::core::PCSTR("WorkerW\0".as_ptr()), 
+                    windows::core::PCSTR::null()
+                );
 
-                    if let Ok(w) = worker {
-                        if w.0 != 0 {
-                             *p_worker_w = w;
-                        }
-                    }
-                    return BOOL::from(false); // Stop enumerating
+                if worker.0 != 0 {
+                     *p_worker_w = worker;
                 }
+                return BOOL::from(false); // Stop enumerating
             }
             BOOL::from(true) // Continue enumerating
         }
