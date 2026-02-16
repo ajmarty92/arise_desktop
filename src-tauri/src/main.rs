@@ -10,14 +10,22 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // --- WorkerW Hack Implementation ---
 #[tauri::command]
 fn attach_to_desktop(window: WebviewWindow) {
-    let window_hwnd = window.hwnd().expect("Failed to get window handle");
+    // 1. Get the handle from Tauri
+    let tauri_handle = window.hwnd().expect("Failed to get window handle");
+
+    // 2. FORCE CAST the handle
+    // We use std::mem::transmute to convert Tauri's HWND (which might be from windows 0.52/0.58)
+    // to our local HWND (windows 0.61). Since both are just wrappers around a pointer, this is safe ABI-wise.
+    let window_hwnd: HWND = unsafe { std::mem::transmute(tauri_handle) };
 
     unsafe {
+        // 3. Find Progman
         let progman = FindWindowA(
             windows::core::PCSTR("Progman\0".as_ptr()), 
             windows::core::PCSTR::null()
         ).unwrap_or(HWND(std::ptr::null_mut()));
 
+        // 4. Send 0x052C to Progman
         let _ = SendMessageTimeoutA(
             progman, 
             0x052C, 
@@ -28,6 +36,7 @@ fn attach_to_desktop(window: WebviewWindow) {
             None
         );
 
+        // 5. Find the WorkerW sibling of SHELLDLL_DefView
         let mut worker_w: HWND = HWND(std::ptr::null_mut());
         
         unsafe extern "system" fn enum_window_callback(handle: HWND, lparam: LPARAM) -> BOOL {
@@ -60,6 +69,7 @@ fn attach_to_desktop(window: WebviewWindow) {
 
         EnumWindows(Some(enum_window_callback), LPARAM(&mut worker_w as *mut _ as isize));
 
+        // 6. Glue our window to the WorkerW
         if worker_w.0 != std::ptr::null_mut() {
             let _ = SetParent(window_hwnd, worker_w);
         }
