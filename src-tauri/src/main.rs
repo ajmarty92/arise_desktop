@@ -10,18 +10,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
 #[tauri::command]
 fn attach_to_desktop(window: WebviewWindow) {
     let tauri_handle = window.hwnd().expect("Failed to get window handle");
-    
-    // Safety cast: Ensures the HWND type matches exactly, regardless of minor version mismatches
+    // Safety cast
     let window_hwnd: HWND = unsafe { std::mem::transmute(tauri_handle) };
 
     unsafe {
         // 1. Find Progman
-        // In 0.52.0, FindWindowA returns Result<HWND>.
-        // We use .unwrap_or to handle failure gracefully.
-        let progman = FindWindowA(
+        let progman = match FindWindowA(
             windows::core::PCSTR("Progman\0".as_ptr()), 
             windows::core::PCSTR::null()
-        ).unwrap_or(HWND(0));
+        ) {
+            Ok(handle) => handle,
+            Err(_) => HWND(0),
+        };
 
         // 2. Spawn WorkerW
         let _ = SendMessageTimeoutA(
@@ -35,7 +35,6 @@ fn attach_to_desktop(window: WebviewWindow) {
         );
 
         // 3. Find the correct WorkerW
-        // In 0.52.0, HWND wraps an isize/pointer, HWND(0) is the null handle.
         let mut worker_w: HWND = HWND(0);
         
         unsafe extern "system" fn enum_window_callback(handle: HWND, lparam: LPARAM) -> BOOL {
@@ -49,7 +48,7 @@ fn attach_to_desktop(window: WebviewWindow) {
                 windows::core::PCSTR::null()
             );
 
-            // Check if Result is Ok and handle is not 0
+            // In 0.52.0, FindWindowExA returns Result<HWND>
             if let Ok(shell_handle) = shell_dll {
                 if shell_handle.0 != 0 {
                     // Look for the WorkerW sibling
@@ -65,10 +64,10 @@ fn attach_to_desktop(window: WebviewWindow) {
                              *p_worker_w = w;
                         }
                     }
-                    return BOOL(0); // Stop enumerating (False)
+                    return BOOL::from(false); // Stop enumerating
                 }
             }
-            BOOL(1) // Continue enumerating (True)
+            BOOL::from(true) // Continue enumerating
         }
 
         let _ = EnumWindows(Some(enum_window_callback), LPARAM(&mut worker_w as *mut _ as isize));
